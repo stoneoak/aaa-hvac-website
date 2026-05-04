@@ -20,8 +20,9 @@ mobileMenu.querySelectorAll('a').forEach(link => {
 document.getElementById('date').min = new Date().toISOString().split('T')[0];
 
 // ── Booking form ──────────────────────────────────────────────────────────────
-// Update API_URL to your deployed backend once live.
-// Set to empty string ('') to disable the API call and show a demo success message.
+// Same-origin POST to /appointments/request when using `uv run uvicorn main:app` (see main.py).
+// Set DEMO_MODE true only for plain `python -m http.server` with no API (fake success).
+const DEMO_MODE = false;
 const API_URL = '';
 
 const form       = document.getElementById('booking-form');
@@ -45,8 +46,9 @@ form.addEventListener('submit', async (e) => {
   submitBtn.disabled = true;
   submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Submitting…</span>';
 
-  if (!API_URL) {
+  if (DEMO_MODE) {
     showSuccess();
+    resetSubmitButton();
     return;
   }
 
@@ -59,15 +61,37 @@ form.addEventListener('submit', async (e) => {
 
     if (res.ok) {
       showSuccess();
+      resetSubmitButton();
     } else {
-      throw new Error(`HTTP ${res.status}`);
+      let extra = '';
+      try {
+        const errBody = await res.json();
+        if (Array.isArray(errBody.detail)) {
+          const msg = errBody.detail[0];
+          if (msg?.msg) extra = `\n\n${msg.msg}`;
+        } else if (typeof errBody.detail === 'string') {
+          extra = `\n\n${errBody.detail}`;
+        }
+      } catch {
+        /* ignore */
+      }
+      throw new Error(`HTTP ${res.status}${extra}`);
     }
-  } catch {
-    alert('Something went wrong. Please call us directly at (555) 000-0000.');
-    submitBtn.disabled = false;
-    submitBtn.innerHTML = '<i class="fa-solid fa-calendar-check"></i><span>Request Appointment</span>';
+  } catch (err) {
+    const hint = err instanceof Error && err.message.startsWith('HTTP')
+      ? err.message
+      : '';
+    alert(
+      `Something went wrong.${hint ? `\n${hint}` : ''}\n\nPlease call us at (726) 237-4888.`,
+    );
+    resetSubmitButton();
   }
 });
+
+function resetSubmitButton() {
+  submitBtn.disabled = false;
+  submitBtn.innerHTML = '<i class="fa-solid fa-calendar-check"></i><span>Request Appointment</span>';
+}
 
 function showSuccess() {
   form.classList.add('hidden');
