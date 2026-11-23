@@ -41,6 +41,7 @@ form.addEventListener('submit', async (e) => {
     preferred_date: document.getElementById('date').value,
     time_window:    document.getElementById('time-window').value,
     notes:          document.getElementById('notes').value,
+    website:        document.getElementById('website').value, // honeypot
   };
 
   submitBtn.disabled = true;

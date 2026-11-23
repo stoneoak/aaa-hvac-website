@@ -15,14 +15,17 @@ from __future__ import annotations
 import os
 import smtplib
 import ssl
+import time
+from collections import defaultdict, deque
 from email.message import EmailMessage
 from pathlib import Path
 
 from smtplib import SMTPException
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -40,6 +43,26 @@ class AppointmentPayload(BaseModel):
     preferred_date: str = Field(..., min_length=1)
     time_window: str = Field(..., min_length=1)
     notes: str = ""
+    website: str = ""  # honeypot: hidden field, real users leave it empty
+
+
+# Rate limit: max submissions per client IP per window (in-memory, per process).
+RATE_LIMIT = 5
+RATE_WINDOW_SECONDS = 3600
+_submissions: dict[str, deque[float]] = defaultdict(deque)
+
+
+def _check_rate_limit(ip: str) -> None:
+    now = time.monotonic()
+    hits = _submissions[ip]
+    while hits and now - hits[0] > RATE_WINDOW_SECONDS:
+        hits.popleft()
+    if len(hits) >= RATE_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests. Please call us instead.",
+        )
+    hits.append(now)
 
 
 def _smtp_send(msg: EmailMessage) -> None:
@@ -114,9 +137,21 @@ app.add_middleware(
 
 
 @app.post("/appointments/request")
-def appointments_request(payload: AppointmentPayload) -> dict[str, bool]:
+def appointments_request(
+    payload: AppointmentPayload, request: Request
+) -> dict[str, bool]:
+    # Bot filled the honeypot: pretend success so it doesn't retry, send nothing.
+    if payload.website.strip():
+        return {"ok": True}
+    _check_rate_limit(request.client.host if request.client else "unknown")
     send_appointment_email(payload)
     return {"ok": True}
 
 
-app.mount("/", StaticFiles(directory=ROOT, html=True), name="static")
+# Serve only public assets. Mounting ROOT would expose .env, main.py, etc.
+@app.get("/", include_in_schema=False)
+def index() -> FileResponse:
+    return FileResponse(ROOT / "index.html")
+
+
+app.mount("/js", StaticFiles(directory=ROOT / "js"), name="js")
